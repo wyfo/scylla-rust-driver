@@ -37,3 +37,7 @@ path = "select-paging.rs"
 [[example]]
 name = "user-defined-type"
 path = "user-defined-type.rs"
+
+[[example]]
+name = "alter-session"
+path = "alter-session.rs"

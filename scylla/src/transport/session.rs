@@ -1,5 +1,8 @@
 use anyhow::Result;
-use futures::{future::RemoteHandle, FutureExt};
+use futures::{
+    future::{try_join_all, RemoteHandle},
+    FutureExt,
+};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -240,6 +243,25 @@ impl Session {
             Response::Error(err) => Err(err.into()),
             Response::Result(_) => Ok(()),
             _ => Err(anyhow!("Unexpected frame received")),
+        }
+    }
+
+    /// Adds a session-specific parameter
+    /// # Arguments
+    ///
+    /// * `key` - key of the parameter
+    /// * `val` - value of the parameter associated with given key
+    pub async fn alter(&self, key: &str, value: &str) -> Result<()> {
+        let connections = self.get_connections()?;
+        let all_connections = connections.iter().flat_map(|(_, v)| v);
+        println!("Connections {}", connections.len());
+
+        let handles = all_connections.map(|c| c.alter(key, value));
+        let mut results = try_join_all(handles).await?;
+
+        match results.pop() {
+            Some(_) => Ok(()),
+            None => Err(anyhow!("No connections available")),
         }
     }
 

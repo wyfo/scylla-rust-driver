@@ -122,6 +122,12 @@ impl Connection {
         self.send_request(&query_frame, true).await
     }
 
+    pub async fn alter(&self, key: &str, value: &str) -> Result<()> {
+        self.query_single_page(format!("ALTER SESSION SET {} = {}", key, value), &[])
+            .await?;
+        Ok(())
+    }
+
     pub async fn execute(
         &self,
         prepared_statement: &PreparedStatement,
