@@ -6,7 +6,7 @@ mod topology;
 pub mod transport_errors;
 
 /// The wire protocol compression algorithm.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Compression {
     /// LZ4 compression algorithm.
     LZ4,

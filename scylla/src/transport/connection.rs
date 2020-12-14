@@ -24,6 +24,7 @@ use crate::routing::ShardInfo;
 use crate::statement::prepared_statement::PreparedStatement;
 use crate::transport::Compression;
 
+#[derive(Debug)]
 pub struct Connection {
     submit_channel: mpsc::Sender<Task>,
     _worker_handle: RemoteHandle<()>,
