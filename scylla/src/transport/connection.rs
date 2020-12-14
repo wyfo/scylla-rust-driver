@@ -22,7 +22,7 @@ use crate::frame::{
 use crate::query::Query;
 use crate::routing::ShardInfo;
 use crate::statement::prepared_statement::PreparedStatement;
-use crate::transport::Compression;
+use crate::transport::{connection_params::ConnectionParams, Compression};
 
 #[derive(Debug)]
 pub struct Connection {
@@ -30,7 +30,7 @@ pub struct Connection {
     _worker_handle: RemoteHandle<()>,
     source_port: u16,
     shard_info: Option<ShardInfo>,
-    compression: Option<Compression>,
+    params: ConnectionParams,
     is_shard_aware: bool,
 }
 
@@ -53,7 +53,7 @@ impl Connection {
     pub async fn new(
         addr: SocketAddr,
         source_port: Option<u16>,
-        compression: Option<Compression>,
+        params: ConnectionParams,
     ) -> Result<Self, TransportError> {
         let stream = match source_port {
             Some(p) => connect_with_source_port(addr, p).await?,
@@ -72,7 +72,7 @@ impl Connection {
             _worker_handle,
             source_port,
             shard_info: None,
-            compression,
+            params,
             is_shard_aware: false,
         })
     }
@@ -202,7 +202,11 @@ impl Connection {
         compress: bool,
     ) -> Result<Response, TransportError> {
         let body = request.to_bytes()?;
-        let compression = if compress { self.compression } else { None };
+        let compression = if compress {
+            self.params.compression
+        } else {
+            None
+        };
         let body_with_ext = RequestBodyWithExtensions { body };
 
         let (flags, raw_request) =
@@ -223,7 +227,7 @@ impl Connection {
         let task_response = receiver.await?;
         let body_with_ext = frame::parse_response_body_extensions(
             task_response.params.flags,
-            self.compression,
+            self.params.compression,
             task_response.body,
         )?;
 
@@ -365,7 +369,7 @@ impl Connection {
     }
 
     fn set_compression(&mut self, compression: Option<Compression>) {
-        self.compression = compression;
+        self.params.compression = compression;
     }
 
     fn set_is_shard_aware(&mut self, is_shard_aware: bool) {
@@ -376,12 +380,12 @@ impl Connection {
 pub async fn open_connection(
     addr: SocketAddr,
     source_port: Option<u16>,
-    compression: Option<Compression>,
+    params: ConnectionParams,
 ) -> Result<Connection, TransportError> {
     open_named_connection(
         addr,
         source_port,
-        compression,
+        params,
         Some("scylla-rust-driver".to_string()),
     )
     .await
@@ -390,11 +394,11 @@ pub async fn open_connection(
 pub async fn open_named_connection(
     addr: SocketAddr,
     source_port: Option<u16>,
-    compression: Option<Compression>,
+    params: ConnectionParams,
     driver_name: Option<String>,
 ) -> Result<Connection, TransportError> {
     // TODO: shouldn't all this logic be in Connection::new?
-    let mut connection = Connection::new(addr, source_port, compression).await?;
+    let mut connection = Connection::new(addr, source_port, params).await?;
 
     let options_result = connection.get_options().await?;
 
@@ -424,7 +428,7 @@ pub async fn open_named_connection(
     if let Some(name) = driver_name {
         options.insert("DRIVER_NAME".to_string(), name);
     }
-    if let Some(compression) = &compression {
+    if let Some(compression) = &params.compression {
         let compression_str = compression.to_string();
         if supported_compression.iter().any(|c| c == &compression_str) {
             // Compression is reported to be supported by the server,

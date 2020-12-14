@@ -1,4 +1,5 @@
 pub mod connection;
+pub mod connection_params;
 pub mod iterator;
 mod metrics;
 pub mod session;

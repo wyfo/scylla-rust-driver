@@ -93,7 +93,7 @@ impl TopologyReader {
         let conn = open_named_connection(
             n.addr,
             None,
-            None,
+            Default::default(),
             Some("scylla-rust-driver:control-connection".to_string()),
         )
         .await?;
@@ -246,7 +246,7 @@ impl TopologyReader {
                 // TODO: use compression?
                 let conn = match timeout(
                     Duration::from_secs(5),
-                    open_connection(node.addr, None, None),
+                    open_connection(node.addr, None, Default::default()),
                 )
                 .await
                 {

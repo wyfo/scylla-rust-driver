@@ -21,10 +21,10 @@ use crate::prepared_statement::{PartitionKeyError, PreparedStatement};
 use crate::query::Query;
 use crate::routing::{murmur3_token, Node, Shard, ShardInfo, Token};
 use crate::transport::connection::{open_connection, Connection};
+use crate::transport::connection_params::ConnectionParams;
 use crate::transport::iterator::RowIterator;
 use crate::transport::metrics::{Metrics, MetricsView};
 use crate::transport::topology::{Topology, TopologyReader};
-use crate::transport::Compression;
 
 type Connections = Vec<(Node, Vec<Arc<Connection>>)>;
 
@@ -37,8 +37,8 @@ pub struct Session {
     // PLEASE DO NOT EXPOSE IT TO THE USER OR PEOPLE WILL DIE
     pool: Arc<RwLock<HashMap<Node, NodePool>>>,
 
-    // compression options passed to the session when it was created
-    compression: Option<Compression>,
+    // options passed to the session when it was created
+    params: ConnectionParams,
 
     topology: Topology,
     _topology_reader_handle: RemoteHandle<()>,
@@ -98,13 +98,14 @@ impl Session {
     /// # Arguments
     ///
     /// * `addr` - address of the server
-    /// * `compression` - optional compression settings
+    /// * `params` - optional settings
     pub async fn connect(
         addr: impl ToSocketAddrs + Display,
-        compression: Option<Compression>,
+        into_params: impl Into<ConnectionParams>,
     ) -> Result<Self, TransportError> {
+        let params: ConnectionParams = into_params.into();
         let addr = resolve(addr).await?;
-        let connection = open_connection(addr, None, compression).await?;
+        let connection = open_connection(addr, None, params).await?;
         let node = Node { addr };
 
         let (topology_reader, topology) = TopologyReader::new(node).await?;
@@ -121,7 +122,7 @@ impl Session {
 
         Ok(Session {
             pool,
-            compression,
+            params,
             topology,
             _topology_reader_handle,
             metrics,
@@ -363,7 +364,7 @@ impl Session {
             // too much work on the query path (and we might still get lucky).
             // The next request using this node's pool will pick the right connection, creating
             // it if necessary.
-            let new_conn = open_connection(owner.addr, None, self.compression).await?;
+            let new_conn = open_connection(owner.addr, None, self.params).await?;
             let new_node_pool = NodePool::new(Arc::new(new_conn));
 
             return Ok(self
@@ -396,7 +397,7 @@ impl Session {
             .as_ref()
             .map(|info| info.draw_source_port_for_token(t));
         let new_conn =
-            Arc::new(open_connection(owner.addr, new_conn_source_port, self.compression).await?);
+            Arc::new(open_connection(owner.addr, new_conn_source_port, self.params).await?);
 
         Ok(
             match self
