@@ -364,7 +364,7 @@ impl Connection {
                 }
 
                 return self
-                    .send_request(&execute_frame, true, prepared_statement.tracing)
+                    .send_request_oneway(&execute_frame, true, prepared_statement.tracing)
                     .await;
             }
         }
@@ -547,6 +547,44 @@ impl Connection {
         })??;
 
         Self::parse_response(task_response, self.config.compression)
+    }
+
+    async fn send_request_oneway<R: Request>(
+        &self,
+        request: &R,
+        compress: bool,
+        tracing: bool,
+    ) -> Result<QueryResponse, QueryError> {
+        let body = request.to_bytes()?;
+        let compression = if compress {
+            self.config.compression
+        } else {
+            None
+        };
+        let body_with_ext = RequestBodyWithExtensions { body };
+
+        let (flags, raw_request) =
+            frame::prepare_request_body_with_extensions(body_with_ext, compression, tracing)?;
+
+        let (sender, receiver) = oneshot::channel();
+
+        self.submit_channel
+            .send(Task {
+                request_flags: flags,
+                request_opcode: R::OPCODE,
+                request_body: raw_request,
+                response_handler: sender,
+            })
+            .await
+            .map_err(|_| {
+                QueryError::IoError(Arc::new(std::io::Error::new(
+                    ErrorKind::Other,
+                    "Connection broken",
+                )))
+            })?;
+
+        // Return an empty result, not waiting for Scylla to respond
+        Ok(Response::Result(result::Result::Rows(Default::default())))
     }
 
     fn parse_response(
