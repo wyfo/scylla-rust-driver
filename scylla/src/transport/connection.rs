@@ -158,7 +158,7 @@ impl Connection {
             },
         };
 
-        self.send_request(&execute_frame, true).await
+        self.send_request_oneway(&execute_frame, true).await
     }
 
     pub async fn batch(
@@ -235,6 +235,34 @@ impl Connection {
         let response = Response::deserialize(task_response.opcode, &mut &*body_with_ext.body)?;
 
         Ok(response)
+    }
+
+    async fn send_request_oneway<R: Request>(
+        &self,
+        request: &R,
+        compress: bool,
+    ) -> Result<Response, TransportError> {
+        let body = request.to_bytes()?;
+        let compression = if compress { self.compression } else { None };
+        let body_with_ext = RequestBodyWithExtensions { body };
+
+        let (flags, raw_request) =
+            frame::prepare_request_body_with_extensions(body_with_ext, compression)?;
+
+        let (sender, _) = oneshot::channel();
+
+        self.submit_channel
+            .send(Task {
+                request_flags: flags,
+                request_opcode: R::OPCODE,
+                request_body: raw_request,
+                response_handler: sender,
+            })
+            .await
+            .map_err(|_| TransportError::DroppedRequest)?;
+
+        // Return an empty result, not waiting for Scylla to respond
+        Ok(Response::Result(result::Result::Rows(Default::default())))
     }
 
     async fn router(mut stream: TcpStream, receiver: mpsc::Receiver<Task>) {

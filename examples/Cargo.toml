@@ -11,6 +11,10 @@ tokio = { version = "0.3.0", features = ["full"] }
 rustyline = "6.3.0"
 
 [[example]]
+name = "rated"
+path = "rated.rs"
+
+[[example]]
 name = "basic"
 path = "basic.rs"
 
