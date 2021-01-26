@@ -40,9 +40,9 @@ async fn main() -> Result<()> {
             )
             .await?;
 
-        let prepared = session
-            .prepare("INSERT INTO ks.t2 (a, b, c) VALUES (?, ?, 'abc')")
-            .await?;
+        let raw_prepared = env::var("SCYLLA_STATEMENT")
+            .unwrap_or_else(|_| "INSERT INTO ks.t2 (a, b, c) VALUES (?, ?, 'abc')".to_owned());
+        let prepared = session.prepare(&raw_prepared).await?;
         contexts.push((session, prepared));
     }
     // Work phase: each worker runs its payload, sending requests at given rate
