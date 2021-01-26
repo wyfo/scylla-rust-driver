@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
         println!("Worker {} connecting to {} ...", p, uri);
         let session = Session::connect(uri, None).await?;
 
-        session.query("CREATE KEYSPACE IF NOT EXISTS ks WITH REPLICATION = {'class' : 'SimpleStrategy', 'replication_factor' : 1}", &[]).await?;
+        session.query("CREATE KEYSPACE IF NOT EXISTS ks WITH REPLICATION = {'class' : 'SimpleStrategy', 'replication_factor' : 3}", &[]).await?;
         session
             .query(
                 "CREATE TABLE IF NOT EXISTS ks.t2 (a bigint, b bigint, c text, primary key (a, b))",
