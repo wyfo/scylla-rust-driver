@@ -68,10 +68,9 @@ async fn main() -> Result<()> {
                 }
                 tokio::time::sleep_until(deadline).await;
                 deadline = tokio::time::Instant::now() + interval;
-                session
+                let _e = session
                     .execute(&prepared, ((i + row_count * p) as i64, 2 * i as i64))
-                    .await
-                    .unwrap();
+                    .await;
             }
             let _permit = permit;
         });
