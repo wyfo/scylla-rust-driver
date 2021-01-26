@@ -1,4 +1,5 @@
 use anyhow::Result;
+use scylla::frame::types::Consistency;
 use scylla::statement::prepared_statement::PreparedStatement;
 use scylla::transport::session::Session;
 use std::env;
@@ -42,7 +43,8 @@ async fn main() -> Result<()> {
 
         let raw_prepared = env::var("SCYLLA_STATEMENT")
             .unwrap_or_else(|_| "INSERT INTO ks.t2 (a, b, c) VALUES (?, ?, 'abc')".to_owned());
-        let prepared = session.prepare(&raw_prepared).await?;
+        let mut prepared = session.prepare(&raw_prepared).await?;
+        prepared.set_consistency(Consistency::Quorum);
         contexts.push((session, prepared));
     }
     // Work phase: each worker runs its payload, sending requests at given rate
