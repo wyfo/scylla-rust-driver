@@ -347,7 +347,7 @@ impl Connection {
         };
 
         let query_response = self
-            .send_request(&execute_frame, true, prepared_statement.tracing)
+            .send_request_oneway(&execute_frame, true, prepared_statement.tracing)
             .await?;
 
         if let Response::Error(err) = &query_response.response {
@@ -566,7 +566,7 @@ impl Connection {
         let (flags, raw_request) =
             frame::prepare_request_body_with_extensions(body_with_ext, compression, tracing)?;
 
-        let (sender, receiver) = oneshot::channel();
+        let (sender, _receiver) = oneshot::channel();
 
         self.submit_channel
             .send(Task {
@@ -584,7 +584,11 @@ impl Connection {
             })?;
 
         // Return an empty result, not waiting for Scylla to respond
-        Ok(Response::Result(result::Result::Rows(Default::default())))
+        Ok(QueryResponse{
+            response: Response::Result(result::Result::Rows(Default::default())),
+            tracing_id: None,
+            warnings: vec![],
+        })
     }
 
     fn parse_response(

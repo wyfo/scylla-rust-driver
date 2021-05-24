@@ -1,7 +1,7 @@
 use anyhow::Result;
 use scylla::frame::types::Consistency;
 use scylla::statement::prepared_statement::PreparedStatement;
-use scylla::transport::session::Session;
+use scylla::{Session, SessionBuilder};
 use std::env;
 use std::io::prelude::*;
 use std::sync::Arc;
@@ -31,7 +31,11 @@ async fn main() -> Result<()> {
     for p in 0..parallelism {
         let uri = env::var("SCYLLA_URI").unwrap_or_else(|_| "127.0.0.1:9042".to_string());
         println!("Worker {} connecting to {} ...", p, uri);
-        let session = Session::connect(uri, None).await?;
+        let session: Session = SessionBuilder::new()
+            .known_node(uri)
+            .user("cassandra", "cassandra")
+            .build()
+            .await?;
 
         session.query("CREATE KEYSPACE IF NOT EXISTS ks WITH REPLICATION = {'class' : 'SimpleStrategy', 'replication_factor' : 3}", &[]).await?;
         session
@@ -43,7 +47,7 @@ async fn main() -> Result<()> {
 
         let raw_prepared = env::var("SCYLLA_STATEMENT")
             .unwrap_or_else(|_| "INSERT INTO ks.t2 (a, b, c) VALUES (?, ?, 'abc')".to_owned());
-        let mut prepared = session.prepare(&raw_prepared).await?;
+        let mut prepared = session.prepare(raw_prepared).await?;
         prepared.set_consistency(Consistency::Quorum);
         contexts.push((session, prepared));
     }
@@ -78,7 +82,7 @@ async fn main() -> Result<()> {
 
     // Wait for all in-flight requests to finish
     for _ in 0..parallelism {
-        sem.acquire().await.forget();
+        sem.acquire().await?.forget();
     }
 
     let total = tokio::time::Instant::now() - start;
