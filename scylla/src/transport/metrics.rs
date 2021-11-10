@@ -83,8 +83,8 @@ impl Metrics {
     ///
     /// * `latency` - time in milliseconds that should be logged
     pub(crate) fn log_query_latency(&self, latency: u64) -> Result<(), MetricsError> {
-        let mut histogram_unlocked = self.histogram.lock().unwrap();
-        histogram_unlocked.increment(latency)?;
+        //let mut histogram_unlocked = self.histogram.lock().unwrap();
+        //histogram_unlocked.increment(latency)?;
         Ok(())
     }
 

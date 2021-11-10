@@ -859,7 +859,7 @@ impl PoolRefiller {
             if use_keyspace_futures.is_empty() {
                 return Ok(());
             }
-
+            debug!("gathering results for {:?}", keyspace_name);
             let use_keyspace_results: Vec<Result<(), QueryError>> =
                 futures::future::join_all(use_keyspace_futures).await;
 

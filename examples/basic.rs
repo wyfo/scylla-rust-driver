@@ -2,17 +2,20 @@ use anyhow::Result;
 use scylla::macros::FromRow;
 use scylla::transport::session::{IntoTypedRows, Session};
 use scylla::SessionBuilder;
-use std::env;
+use scylla::statement::Consistency;
+use tracing_subscriber;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let uri = env::var("SCYLLA_URI").unwrap_or_else(|_| "127.0.0.1:9042".to_string());
+    tracing_subscriber::fmt::init();
 
-    println!("Connecting to {} ...", uri);
+    let session: Session = SessionBuilder::new().known_node("127.0.0.1:9042").default_consistency(Consistency::One).build().await?;
 
-    let session: Session = SessionBuilder::new().known_node(uri).build().await?;
-
-    session.query("CREATE KEYSPACE IF NOT EXISTS ks WITH REPLICATION = {'class' : 'SimpleStrategy', 'replication_factor' : 1}", &[]).await?;
+    println!("will create");
+    session.query("CREATE KEYSPACE IF NOT EXISTS ks WITH REPLICATION = {'class' : 'SimpleStrategy', 'replication_factor' : 3}", &[]).await?;
+    println!("created; using");
+    session.use_keyspace("ks", false).await?;
+    println!("used");
 
     session
         .query(
@@ -21,26 +24,36 @@ async fn main() -> Result<()> {
         )
         .await?;
 
+    println!("queried createtable");
+
     session
         .query("INSERT INTO ks.t (a, b, c) VALUES (?, ?, ?)", (3, 4, "def"))
         .await?;
 
+
+    println!("inserted");
     session
         .query("INSERT INTO ks.t (a, b, c) VALUES (1, 2, 'abc')", &[])
         .await?;
 
+    println!("inserted");
     let prepared = session
         .prepare("INSERT INTO ks.t (a, b, c) VALUES (?, 7, ?)")
         .await?;
+    println!("inserted");
     session
         .execute(&prepared, (42_i32, "I'm prepared!"))
         .await?;
+    println!("inserted");
     session
         .execute(&prepared, (43_i32, "I'm prepared 2!"))
         .await?;
+    println!("inserted 43");
     session
         .execute(&prepared, (44_i32, "I'm prepared 3!"))
         .await?;
+
+    println!("executed");
 
     // Rows can be parsed as tuples
     if let Some(rows) = session.query("SELECT a, b, c FROM ks.t", &[]).await?.rows {

@@ -23,6 +23,7 @@ use std::{
     cmp::Ordering,
     net::{Ipv4Addr, Ipv6Addr},
 };
+use tracing::debug;
 
 use super::errors::{BadKeyspaceName, BadQuery, DbError, QueryError};
 
@@ -565,7 +566,9 @@ impl Connection {
             false => format!("USE {}", keyspace_name.as_str()).into(),
         };
 
+        debug!("Sending use keyspace: {}", self.connect_address);
         let query_response = self.query(&query, (), None).await?;
+        debug!("Sent use keyspace: {}", self.connect_address);
 
         match query_response.response {
             Response::Result(result::Result::SetKeyspace(set_keyspace)) => {
