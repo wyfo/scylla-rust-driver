@@ -2,8 +2,8 @@ use bytes::Bytes;
 use futures::{future::RemoteHandle, FutureExt};
 use tokio::io::{split, AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
-use tokio::sync::{mpsc, oneshot};
-use tracing::{error, warn};
+use tokio::sync::{mpsc, oneshot, Notify};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 #[cfg(feature = "ssl")]
@@ -862,7 +862,9 @@ impl Connection {
                 // We are guaranteed here that handler_map will not be locked
                 // by anybody else, so we can do try_lock().unwrap()
                 let mut lock = handler_map.try_lock().unwrap();
-                lock.take(params.stream)
+                let handler = lock.take(params.stream);
+                lock.notifier().notify_one();
+                handler
             };
 
             if let Some(handler) = handler {
@@ -896,19 +898,24 @@ impl Connection {
                     response_handler,
                     serialized_request,
                 } => {
-                    let stream_id = {
-                        let mut hmap = handler_map.try_lock().unwrap();
-                        // TODO: Handle stream id allocation error better,
-                        // for now the error is propagated to the connection
-                        if let Some(id) = hmap.allocate(response_handler) {
-                            stream_id_sender
-                                .send(id)
-                                .map_err(|_| QueryError::UnableToAllocStreamId)?;
-                            id
-                        } else {
-                            error!("Unable to allocate stream id");
-                            continue;
+                    let notifier = {
+                        handler_map.try_lock().unwrap().notifier()
+                    };
+                    let stream_id = loop {
+                        {
+                            let mut hmap = handler_map.try_lock().unwrap();
+                            // TODO: Handle stream id allocation error better,
+                            // for now the error is propagated to the connection
+                            if let Some(id) = hmap.allocate_id() {
+                                hmap.insert_handler(id, response_handler);
+                                stream_id_sender
+                                    .send(id)
+                                    .map_err(|_| QueryError::UnableToAllocStreamId)?;
+                                break id
+                            }
                         }
+                        debug!("Unable to allocate stream id");
+                        notifier.notified().await
                     };
                     let mut req = serialized_request;
                     req.set_stream(stream_id);
@@ -1146,6 +1153,7 @@ struct ResponseHandlerMap {
     handlers: HashMap<i16, ResponseHandler>,
     orphan_count: u16,
     orphanage: StreamIdSet,
+    notifier: Arc<Notify>,
 }
 
 impl ResponseHandlerMap {
@@ -1155,14 +1163,17 @@ impl ResponseHandlerMap {
             handlers: HashMap::new(),
             orphan_count: 0,
             orphanage: StreamIdSet::new(),
+            notifier: Arc::new(Notify::new()),
         }
     }
 
-    pub fn allocate(&mut self, response_handler: ResponseHandler) -> Option<i16> {
-        let stream_id = self.stream_set.allocate()?;
+    pub fn allocate_id(&mut self) -> Option<i16> {
+        self.stream_set.allocate()
+    }
+
+    pub fn insert_handler(&mut self, stream_id: i16, response_handler: ResponseHandler) {
         let prev_handler = self.handlers.insert(stream_id, response_handler);
         assert!(prev_handler.is_none());
-        Some(stream_id)
     }
 
     pub fn take(&mut self, stream_id: i16) -> Option<ResponseHandler> {
@@ -1189,6 +1200,10 @@ impl ResponseHandlerMap {
     // and we have to respond to all of them with an error
     pub fn into_handlers(self) -> HashMap<i16, ResponseHandler> {
         self.handlers
+    }
+
+    pub fn notifier(&self) -> Arc<Notify> {
+        self.notifier.clone()
     }
 }
 
