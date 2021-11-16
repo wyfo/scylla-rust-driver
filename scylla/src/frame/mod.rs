@@ -77,6 +77,10 @@ impl SerializedRequest {
     pub fn get_data(&self) -> &[u8] {
         &self.data[..]
     }
+
+    pub fn extract_data(self) -> Vec<u8> {
+        self.data
+    }
 }
 
 // Parts of the frame header which are not determined by the request/response type.
