@@ -1,9 +1,9 @@
 use bytes::Bytes;
 use futures::{future::RemoteHandle, FutureExt};
-use tokio::io::{split, AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{split, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, warn};
+use tracing::{error, warn, debug};
 use uuid::Uuid;
 
 #[cfg(feature = "ssl")]
@@ -241,7 +241,7 @@ impl Connection {
         stream.set_nodelay(config.tcp_nodelay)?;
 
         // TODO: What should be the size of the channel?
-        let (sender, receiver) = mpsc::channel(128);
+        let (sender, receiver) = mpsc::channel(1024);
 
         let (error_sender, error_receiver) = tokio::sync::oneshot::channel();
 
@@ -747,7 +747,7 @@ impl Connection {
         // across .await points. Therefore, it should not be too expensive.
         let handler_map = StdMutex::new(ResponseHandlerMap::new());
 
-        let r = Self::reader(read_half, &handler_map, config);
+        let r = Self::reader(BufReader::new(read_half), &handler_map, config);
         let w = Self::writer(write_half, &handler_map, receiver);
 
         let result = futures::try_join!(r, w);
@@ -847,7 +847,35 @@ impl Connection {
 
             let mut req = task.serialized_request;
             req.set_stream(stream_id);
-            write_half.write_all(req.get_data()).await?;
+            let mut buf: Vec<u8> = vec![];
+            buf.extend_from_slice(req.get_data());
+
+            let mut buffer_threshold = 10;
+            while let Ok(task) = task_receiver.try_recv() {
+                let stream_id = {
+                    // We are guaranteed here that handler_map will not be locked
+                    // by anybody else, so we can do try_lock().unwrap()
+                    let mut lock = handler_map.try_lock().unwrap();
+    
+                    if let Some(stream_id) = lock.allocate(task.response_handler) {
+                        stream_id
+                    } else {
+                        // TODO: Handle this error better, for now we drop this
+                        // request and return an error to the receiver
+                        error!("Could not allocate stream id");
+                        continue;
+                    }
+                };
+                let mut req = task.serialized_request;
+                req.set_stream(stream_id);
+                debug!("Extended a req!; left: {}", buffer_threshold);
+                buffer_threshold -= 1;
+                buf.extend_from_slice(req.get_data());
+                if buffer_threshold == 0 {
+                    break;
+                }
+            }
+            write_half.write_all(&buf).await?;
         }
 
         Ok(())
