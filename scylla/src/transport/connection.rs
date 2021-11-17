@@ -18,6 +18,7 @@ use std::convert::TryFrom;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::time::Instant;
 use std::sync::Mutex as StdMutex;
 use std::{
     cmp::Ordering,
@@ -863,14 +864,19 @@ impl Connection {
                 let req_data: &[u8] = req.get_data();
                 total_sent += req_data.len();
                 num_requests += 1;
+                trace!("Putting {}B", req_data.len());
+                let now = Instant::now();
                 write_half.write_all(req_data).await?;
+                trace!("Putting took {:?}", Instant::now() - now);
                 task = match task_receiver.try_recv() {
                     Ok(t) => t,
                     Err(_) => break,
                 }
             }
             trace!("Sending {} requests; {} bytes", num_requests, total_sent);
+            let now = Instant::now();
             write_half.flush().await?;
+            trace!("Sending took {:?}", Instant::now() - now);
         }
 
         Ok(())
