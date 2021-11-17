@@ -18,6 +18,7 @@ use std::convert::TryFrom;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::time::Instant;
 use std::sync::Mutex as StdMutex;
 use std::{
     cmp::Ordering,
@@ -870,7 +871,9 @@ impl Connection {
                 }
             }
             trace!("Sending {} requests; {} bytes", num_requests, total_sent);
+            let now = Instant::now();
             write_half.flush().await?;
+            trace!("Sending took {:?}", Instant::now() - now);
         }
 
         Ok(())
