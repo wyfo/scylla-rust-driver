@@ -1011,58 +1011,19 @@ impl Session {
             }
         }
 
-        let retry_policy = match &statement_config.retry_policy {
-            Some(policy) => policy,
-            None => &self.retry_policy,
-        };
 
-        let speculative_policy = statement_config
-            .speculative_execution_policy
-            .as_ref()
-            .or_else(|| self.speculative_execution_policy.as_ref());
-
-        match speculative_policy {
-            Some(speculative) if statement_config.is_idempotent => {
-                let shared_query_plan = SharedPlan {
-                    iter: std::sync::Mutex::new(query_plan),
-                };
-
-                let execute_query_generator = || {
-                    self.execute_query(
-                        &shared_query_plan,
-                        statement_config.is_idempotent,
-                        statement_config.consistency,
-                        retry_policy.new_session(),
-                        &choose_connection,
-                        &do_query,
-                    )
-                };
-
-                let context = speculative_execution::Context {
-                    metrics: self.metrics.clone(),
-                };
-
-                speculative_execution::execute(
-                    speculative.as_ref(),
-                    &context,
-                    execute_query_generator,
-                )
-                .await
-            }
-            _ => self
-                .execute_query(
-                    query_plan,
-                    statement_config.is_idempotent,
-                    statement_config.consistency,
-                    retry_policy.new_session(),
-                    &choose_connection,
-                    &do_query,
-                )
-                .await
-                .unwrap_or(Err(QueryError::ProtocolError(
-                    "Empty query plan - driver bug!",
-                ))),
-        }
+        self.execute_query(
+                query_plan,
+                statement_config.is_idempotent,
+                statement_config.consistency,
+                self.retry_policy.new_session(),
+                &choose_connection,
+                &do_query,
+            )
+            .await
+            .unwrap_or(Err(QueryError::ProtocolError(
+                "Empty query plan - driver bug!",
+            )))
     }
 
     async fn execute_query<ConnFut, QueryFut, ResT>(
