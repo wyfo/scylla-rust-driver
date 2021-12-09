@@ -56,12 +56,15 @@ pub struct Time(pub Duration);
 pub struct SerializedValues {
     serialized_values: Vec<u8>,
     values_num: i16,
+    pub contains_names: bool,
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SerializeValuesError {
     #[error("Too many values to add, max 32 767 values can be sent in a request")]
     TooManyValues,
+    #[error("Mixing named and not named values is not allowed")]
+    MixingNamedAndNotNamedValues,
     #[error(transparent)]
     ValueTooBig(#[from] ValueTooBig),
 }
@@ -104,6 +107,7 @@ impl SerializedValues {
         SerializedValues {
             serialized_values: Vec::new(),
             values_num: 0,
+            contains_names: false,
         }
     }
 
@@ -111,7 +115,12 @@ impl SerializedValues {
         SerializedValues {
             serialized_values: Vec::with_capacity(capacity),
             values_num: 0,
+            contains_names: false,
         }
+    }
+
+    pub fn with_names(&self) -> bool {
+        self.contains_names
     }
 
     /// A const empty instance, useful for taking references
@@ -119,6 +128,9 @@ impl SerializedValues {
 
     /// Serializes value and appends it to the list
     pub fn add_value(&mut self, val: &impl Value) -> Result<(), SerializeValuesError> {
+        if self.contains_names {
+            return Err(SerializeValuesError::MixingNamedAndNotNamedValues);
+        }
         if self.values_num == i16::max_value() {
             return Err(SerializeValuesError::TooManyValues);
         }
@@ -134,10 +146,38 @@ impl SerializedValues {
         Ok(())
     }
 
+    pub fn add_named_value(
+        &mut self,
+        name: &str,
+        val: &impl Value,
+    ) -> Result<(), SerializeValuesError> {
+        if self.values_num > 0 && !self.contains_names {
+            return Err(SerializeValuesError::MixingNamedAndNotNamedValues);
+        }
+        self.contains_names = true;
+        if self.values_num == i16::max_value() {
+            return Err(SerializeValuesError::TooManyValues);
+        }
+
+        let len_before_serialize: usize = self.serialized_values.len();
+
+        self.serialized_values.put_i16(name.len() as i16);
+        self.serialized_values.put(name.as_bytes());
+
+        if let Err(e) = val.serialize(&mut self.serialized_values) {
+            self.serialized_values.resize(len_before_serialize, 0);
+            return Err(SerializeValuesError::from(e));
+        }
+
+        self.values_num += 1;
+        Ok(())
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = Option<&[u8]>> {
         SerializedValuesIterator {
             serialized_values: &self.serialized_values,
             next_offset: 0,
+            contains_names: self.contains_names,
         }
     }
 
@@ -159,13 +199,26 @@ impl SerializedValues {
 pub struct SerializedValuesIterator<'a> {
     serialized_values: &'a [u8],
     next_offset: usize,
+    contains_names: bool,
 }
 
 impl<'a> Iterator for SerializedValuesIterator<'a> {
     type Item = Option<&'a [u8]>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Read next value's 4 byte size, return it, advance
+        // Read next value's 4 byte size, return it, advance.
+        // In case of named values, skip names
+        if self.contains_names {
+            if self.next_offset + 2 > self.serialized_values.len() {
+                return None;
+            }
+            let len_bytes: [u8; 2] = self.serialized_values
+                [self.next_offset..(self.next_offset + 2)]
+                .try_into()
+                .unwrap();
+            let next_name_len: i16 = i16::from_be_bytes(len_bytes);
+            self.next_offset += 2 + next_name_len as usize;
+        }
 
         if self.next_offset + 4 > self.serialized_values.len() {
             // Reached the end - nothing more to read
@@ -642,6 +695,25 @@ impl<T: Value> ValueList for Vec<T> {
         Ok(Cow::Owned(result))
     }
 }
+
+// Implement ValueList for maps, which serializes named values
+macro_rules! impl_value_list_for_map {
+    ($map_type:ident) => {
+        impl<T: Value> ValueList for $map_type<String, T> {
+            fn serialized(&self) -> SerializedResult<'_> {
+                let mut result = SerializedValues::with_capacity(self.len());
+                for (key, val) in self {
+                    result.add_named_value(key, val)?;
+                }
+
+                Ok(Cow::Owned(result))
+            }
+        }
+    };
+}
+
+impl_value_list_for_map!(HashMap);
+impl_value_list_for_map!(BTreeMap);
 
 // Implement ValueList for tuples of Values of size up to 16
 
