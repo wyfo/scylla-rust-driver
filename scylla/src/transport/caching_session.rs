@@ -7,6 +7,46 @@ use crate::{QueryResult, Session};
 use bytes::Bytes;
 use dashmap::DashMap;
 use itertools::Either;
+use std::sync::Arc;
+
+pub trait QueryString {
+    fn query_string(&self) -> &str;
+}
+
+impl QueryString for String {
+    fn query_string(&self) -> &str {
+        self
+    }
+}
+
+impl<'a> QueryString for &'a str {
+    fn query_string(&self) -> &str {
+        self
+    }
+}
+
+impl QueryString for Query {
+    fn query_string(&self) -> &str {
+        &self.contents
+    }
+}
+
+impl QueryString for Arc<PreparedStatement> {
+    fn query_string(&self) -> &str {
+        self.get_statement()
+    }
+}
+
+impl From<Arc<PreparedStatement>> for Query {
+    fn from(stmt: Arc<PreparedStatement>) -> Self {
+        let mut query = Query::new(stmt.get_statement());
+        query.config = stmt.config.clone();
+        if let Some(page_size) = stmt.get_page_size() {
+            query.set_page_size(page_size);
+        }
+        query
+    }
+}
 
 /// Provides auto caching while executing queries
 pub struct CachingSession {
@@ -15,7 +55,7 @@ pub struct CachingSession {
     /// If a prepared statement is added while the limit is reached, the oldest prepared statement
     /// is removed from the cache
     pub max_capacity: usize,
-    pub cache: DashMap<String, PreparedStatement>,
+    pub cache: DashMap<String, Arc<PreparedStatement>>,
 }
 
 impl CachingSession {
@@ -30,15 +70,17 @@ impl CachingSession {
     /// Does the same thing as [`Session::execute`] but uses the prepared statement cache
     pub async fn execute(
         &self,
-        query: impl Into<Query>,
+        query: impl Into<Query> + QueryString,
         values: impl ValueList,
     ) -> Result<QueryResult, QueryError> {
-        let query = query.into();
-        let prepared = self.add_prepared_statement(&query).await?;
+        let prepared = self.add_prepared_statement(query).await?;
         let values = values.serialized()?;
         let result = self.session.execute(&prepared, values.clone()).await;
 
-        match self.post_execute_prepared_statement(&query, result).await? {
+        match self
+            .post_execute_prepared_statement(prepared, result)
+            .await?
+        {
             Either::Left(result) => Ok(result),
             Either::Right(new_prepared_statement) => {
                 self.session.execute(&new_prepared_statement, values).await
@@ -49,19 +91,24 @@ impl CachingSession {
     /// Does the same thing as [`Session::execute_iter`] but uses the prepared statement cache
     pub async fn execute_iter(
         &self,
-        query: impl Into<Query>,
+        query: impl Into<Query> + QueryString,
         values: impl ValueList,
     ) -> Result<RowIterator, QueryError> {
-        let query = query.into();
-        let prepared = self.add_prepared_statement(&query).await?;
+        let prepared = self.add_prepared_statement(query).await?;
         let values = values.serialized()?;
-        let result = self.session.execute_iter(prepared, values.clone()).await;
+        let result = self
+            .session
+            .execute_iter((*prepared).clone(), values.clone())
+            .await;
 
-        match self.post_execute_prepared_statement(&query, result).await? {
+        match self
+            .post_execute_prepared_statement(prepared, result)
+            .await?
+        {
             Either::Left(result) => Ok(result),
             Either::Right(new_prepared_statement) => {
                 self.session
-                    .execute_iter(new_prepared_statement, values)
+                    .execute_iter((*new_prepared_statement).clone(), values)
                     .await
             }
         }
@@ -70,19 +117,21 @@ impl CachingSession {
     /// Does the same thing as [`Session::execute_paged`] but uses the prepared statement cache
     pub async fn execute_paged(
         &self,
-        query: impl Into<Query>,
+        query: impl Into<Query> + QueryString,
         values: impl ValueList,
         paging_state: Option<Bytes>,
     ) -> Result<QueryResult, QueryError> {
-        let query = query.into();
-        let prepared = self.add_prepared_statement(&query).await?;
+        let prepared = self.add_prepared_statement(query).await?;
         let values = values.serialized()?;
         let result = self
             .session
             .execute_paged(&prepared, values.clone(), paging_state.clone())
             .await;
 
-        match self.post_execute_prepared_statement(&query, result).await? {
+        match self
+            .post_execute_prepared_statement(prepared, result)
+            .await?
+        {
             Either::Left(result) => Ok(result),
             Either::Right(new_prepared_statement) => {
                 self.session
@@ -95,15 +144,15 @@ impl CachingSession {
     /// Adds a prepared statement to the cache
     pub async fn add_prepared_statement(
         &self,
-        query: impl Into<&Query>,
-    ) -> Result<PreparedStatement, QueryError> {
+        query: impl Into<Query> + QueryString,
+    ) -> Result<Arc<PreparedStatement>, QueryError> {
         let query = query.into();
 
         if let Some(prepared) = self.cache.get(&query.contents) {
             // Clone, because else the value is mutably borrowed and the execute method gives a compile error
             Ok(prepared.clone())
         } else {
-            let prepared = self.session.prepare(query.clone()).await?;
+            let prepared = Arc::new(self.session.prepare(query.clone()).await?);
 
             if self.max_capacity == self.cache.len() {
                 // Cache is full, remove the first entry
@@ -131,9 +180,9 @@ impl CachingSession {
     ///     - [`QueryError`] when an error occurred
     async fn post_execute_prepared_statement<T>(
         &self,
-        query: &Query,
+        stmt: Arc<PreparedStatement>,
         result: Result<T, QueryError>,
-    ) -> Result<Either<T, PreparedStatement>, QueryError> {
+    ) -> Result<Either<T, Arc<PreparedStatement>>, QueryError> {
         match result {
             Ok(qr) => Ok(Either::Left(qr)),
             Err(err) => {
@@ -143,9 +192,9 @@ impl CachingSession {
                 match err {
                     QueryError::DbError(db_error, message) => match db_error {
                         DbError::Unprepared { .. } => {
-                            self.cache.remove(&query.contents);
+                            self.cache.remove(stmt.get_statement());
 
-                            let prepared = self.add_prepared_statement(query).await?;
+                            let prepared = self.add_prepared_statement(stmt).await?;
 
                             Ok(Either::Right(prepared))
                         }
@@ -223,18 +272,9 @@ mod tests {
         let middle_query = "insert into test_table(a, b) values (?, ?)";
         let last_query = "update test_table set b = ? where a = 1";
 
-        session
-            .add_prepared_statement(&first_query.into())
-            .await
-            .unwrap();
-        session
-            .add_prepared_statement(&middle_query.into())
-            .await
-            .unwrap();
-        session
-            .add_prepared_statement(&last_query.into())
-            .await
-            .unwrap();
+        session.add_prepared_statement(first_query).await.unwrap();
+        session.add_prepared_statement(middle_query).await.unwrap();
+        session.add_prepared_statement(last_query).await.unwrap();
 
         assert_eq!(2, session.cache.len());
 
