@@ -98,7 +98,7 @@ async fn test_unprepared_statement() {
     let (c_idx, _) = query_result.get_column_spec("c").unwrap();
     assert!(query_result.get_column_spec("d").is_none());
 
-    let rs = query_result.rows.unwrap();
+    let rs = query_result.rows().unwrap();
 
     let mut results: Vec<(i32, i32, &String)> = rs
         .iter()
@@ -137,12 +137,13 @@ async fn test_unprepared_statement() {
             .query_paged(query.clone(), &[], paging_state)
             .await
             .unwrap();
-        results_from_manual_paging.append(&mut rs_manual.rows.unwrap());
-        if watchdog > 30 || rs_manual.paging_state == None {
+        let rs_paging_state = rs_manual.paging_state.clone();
+        results_from_manual_paging.append(&mut rs_manual.rows().unwrap());
+        if watchdog > 30 || rs_paging_state == None {
             break;
         }
         watchdog += 1;
-        paging_state = rs_manual.paging_state;
+        paging_state = rs_paging_state;
     }
     assert_eq!(results_from_manual_paging, rs);
 }
@@ -212,7 +213,7 @@ async fn test_prepared_statement() {
             .query(format!("SELECT token(a) FROM {}.t2", ks), &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap();
         let token = Token {
             value: rs.first().unwrap().columns[0]
@@ -238,7 +239,7 @@ async fn test_prepared_statement() {
             .query(format!("SELECT token(a,b,c) FROM {}.complex_pk", ks), &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap();
         let token = Token {
             value: rs.first().unwrap().columns[0]
@@ -266,7 +267,7 @@ async fn test_prepared_statement() {
             .query(format!("SELECT a,b,c FROM {}.t2", ks), &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap();
         let r = rs.first().unwrap();
         let a = r.columns[0].as_ref().unwrap().as_int().unwrap();
@@ -284,12 +285,13 @@ async fn test_prepared_statement() {
                 .execute_paged(&prepared_paged, &[], paging_state)
                 .await
                 .unwrap();
-            results_from_manual_paging.append(&mut rs_manual.rows.unwrap());
-            if watchdog > 30 || rs_manual.paging_state == None {
+            let rs_paging_state = rs_manual.paging_state.clone();
+            results_from_manual_paging.append(&mut rs_manual.rows().unwrap());
+            if watchdog > 30 || rs_paging_state == None {
                 break;
             }
             watchdog += 1;
-            paging_state = rs_manual.paging_state;
+            paging_state = rs_paging_state;
         }
         assert_eq!(results_from_manual_paging, rs);
     }
@@ -298,7 +300,7 @@ async fn test_prepared_statement() {
             .query(format!("SELECT a,b,c,d,e FROM {}.complex_pk", ks), &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap();
         let r = rs.first().unwrap();
         let a = r.columns[0].as_ref().unwrap().as_int().unwrap();
@@ -346,7 +348,7 @@ async fn test_prepared_statement() {
             )
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<ComplexPk>();
         let output = rs.next().unwrap().unwrap();
@@ -396,7 +398,7 @@ async fn test_batch() {
         .query(format!("SELECT a, b, c FROM {}.t_batch", ks), &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap();
 
     let mut results: Vec<(i32, i32, &String)> = rs
@@ -440,7 +442,7 @@ async fn test_batch() {
         )
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap();
     let results: Vec<(i32, i32, &String)> = rs
         .iter()
@@ -497,7 +499,7 @@ async fn test_token_calculation() {
             )
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap();
         let token = Token {
             value: rs.first().unwrap().columns[0]
@@ -556,7 +558,7 @@ async fn test_use_keyspace() {
         .query("SELECT * FROM tab", &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(String,)>()
         .map(|res| res.unwrap().0)
@@ -607,7 +609,7 @@ async fn test_use_keyspace() {
         .query("SELECT * FROM tab", &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(String,)>()
         .map(|res| res.unwrap().0)
@@ -672,7 +674,7 @@ async fn test_use_keyspace_case_sensitivity() {
         .query("SELECT * from tab", &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(String,)>()
         .map(|row| row.unwrap().0)
@@ -688,7 +690,7 @@ async fn test_use_keyspace_case_sensitivity() {
         .query("SELECT * from tab", &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(String,)>()
         .map(|row| row.unwrap().0)
@@ -734,7 +736,7 @@ async fn test_raw_use_keyspace() {
         .query("SELECT * FROM tab", &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(String,)>()
         .map(|res| res.unwrap().0)
@@ -1036,7 +1038,7 @@ async fn assert_in_tracing_table(session: &Session, tracing_uuid: Uuid) {
             .query(traces_query.clone(), (tracing_uuid,))
             .await
             .unwrap()
-            .rows
+            .rows()
             .into_iter()
             .next();
 
@@ -1169,7 +1171,7 @@ async fn test_timestamp() {
         )
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(String, String, i64)>()
         .map(Result::unwrap)
@@ -1778,7 +1780,7 @@ async fn test_named_bind_markers() {
         .query("SELECT pk, ck, v FROM t", &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(i32, i32, i32)>()
         .map(|res| res.unwrap())

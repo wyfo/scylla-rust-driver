@@ -104,11 +104,12 @@ impl Stream for RowIterator {
         }
 
         let idx = s.current_row_idx;
-        if idx < s.current_page.rows.len() {
-            let row = mem::take(&mut s.current_page.rows[idx]);
-            s.current_row_idx += 1;
-            return Poll::Ready(Some(Ok(row)));
-        }
+        todo!();
+        // if idx < s.current_page.rows.len() {
+        //     let row = mem::take(&mut s.current_page.rows[idx]);
+        //     s.current_row_idx += 1;
+        //     return Poll::Ready(Some(Ok(row)));
+        // }
 
         // We probably got a zero-sized page
         // Yield, but tell that we are ready
@@ -273,7 +274,7 @@ impl RowIterator {
     }
 
     fn is_current_page_exhausted(&self) -> bool {
-        self.current_row_idx >= self.current_page.rows.len()
+        self.current_row_idx >= self.current_page.bytes.len()
     }
 }
 

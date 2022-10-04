@@ -10,7 +10,7 @@ pub mod value;
 mod value_tests;
 
 use crate::frame::frame_errors::FrameError;
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use uuid::Uuid;
 
@@ -149,7 +149,7 @@ pub async fn read_response_frame(
     // TODO: Guard from frames that are too large
     let length = buf.get_u32() as usize;
 
-    let mut raw_body = Vec::with_capacity(length).limit(length);
+    let mut raw_body = BytesMut::with_capacity(length).limit(length);
     while raw_body.has_remaining_mut() {
         let n = reader.read_buf(&mut raw_body).await?;
         if n == 0 {

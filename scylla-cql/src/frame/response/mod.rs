@@ -3,9 +3,11 @@ pub mod cql_to_rust;
 pub mod error;
 pub mod event;
 pub mod result;
+pub mod rows;
 pub mod supported;
 
 use crate::{errors::QueryError, frame::frame_errors::ParseError};
+use bytes::{Buf, Bytes};
 use num_enum::TryFromPrimitive;
 
 use crate::frame::protocol_features::ProtocolFeatures;
@@ -41,8 +43,10 @@ impl Response {
     pub fn deserialize(
         features: &ProtocolFeatures,
         opcode: ResponseOpcode,
-        buf: &mut &[u8],
+        bytes: Bytes,
     ) -> Result<Response, ParseError> {
+        let mut chunk = bytes.chunk();
+        let buf = &mut chunk;
         let response = match opcode {
             ResponseOpcode::Error => Response::Error(Error::deserialize(features, buf)?),
             ResponseOpcode::Ready => Response::Ready,
@@ -50,7 +54,7 @@ impl Response {
                 Response::Authenticate(authenticate::Authenticate::deserialize(buf)?)
             }
             ResponseOpcode::Supported => Response::Supported(Supported::deserialize(buf)?),
-            ResponseOpcode::Result => Response::Result(result::deserialize(buf)?),
+            ResponseOpcode::Result => Response::Result(result::deserialize(bytes)?),
             ResponseOpcode::Event => Response::Event(event::Event::deserialize(buf)?),
             ResponseOpcode::AuthChallenge => {
                 Response::AuthChallenge(authenticate::AuthChallenge::deserialize(buf)?)

@@ -186,13 +186,14 @@ impl NonErrorQueryResponse {
     }
 
     pub fn into_query_result(self) -> Result<QueryResult, QueryError> {
-        let (rows, paging_state, col_specs) = match self.response {
+        let (bytes, row_count, paging_state, col_specs) = match self.response {
             NonErrorResponse::Result(result::Result::Rows(rs)) => (
-                Some(rs.rows),
+                Some(rs.bytes),
+                rs.rows_count,
                 rs.metadata.paging_state,
                 rs.metadata.col_specs,
             ),
-            NonErrorResponse::Result(_) => (None, None, vec![]),
+            NonErrorResponse::Result(_) => (None, 0, None, vec![]),
             _ => {
                 return Err(QueryError::ProtocolError(
                     "Unexpected server response, expected Result or Error",
@@ -201,7 +202,8 @@ impl NonErrorQueryResponse {
         };
 
         Ok(QueryResult {
-            rows,
+            bytes,
+            row_count,
             warnings: self.warnings,
             tracing_id: self.tracing_id,
             paging_state,
@@ -757,8 +759,8 @@ impl Connection {
         let (version_id,): (Uuid,) = self
             .query_single_page(LOCAL_VERSION, &[])
             .await?
-            .rows
-            .ok_or(QueryError::ProtocolError("Version query returned not rows"))?
+            .rows()
+            .map_err(|_| QueryError::ProtocolError("Version query returned not rows"))?
             .into_typed::<(Uuid,)>()
             .next()
             .ok_or(QueryError::ProtocolError("Admin table returned empty rows"))?
@@ -842,8 +844,7 @@ impl Connection {
             warn!(warning = warn_description.as_str());
         }
 
-        let response =
-            Response::deserialize(features, task_response.opcode, &mut &*body_with_ext.body)?;
+        let response = Response::deserialize(features, task_response.opcode, body_with_ext.body)?;
 
         Ok(QueryResponse {
             response,
@@ -1591,12 +1592,12 @@ mod tests {
         // 1. SELECT from an empty table returns query result where rows are Some(Vec::new())
         let select_query = Query::new("SELECT p FROM connection_query_all_tab").with_page_size(7);
         let empty_res = connection.query_all(&select_query, &[]).await.unwrap();
-        assert!(empty_res.rows.unwrap().is_empty());
+        assert!(empty_res.rows().unwrap().is_empty());
 
         let mut prepared_select = connection.prepare(&select_query).await.unwrap();
         prepared_select.set_page_size(7);
         let empty_res_prepared = connection.execute_all(&prepared_select, &[]).await.unwrap();
-        assert!(empty_res_prepared.rows.unwrap().is_empty());
+        assert!(empty_res_prepared.rows().unwrap().is_empty());
 
         // 2. Insert 100 and select using query_all with page_size 7
         let values: Vec<i32> = (0..100).collect();
@@ -1613,7 +1614,7 @@ mod tests {
             .query_all(&select_query, &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(i32,)>()
             .map(|r| r.unwrap().0)
@@ -1625,7 +1626,7 @@ mod tests {
             .execute_all(&prepared_select, &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(i32,)>()
             .map(|r| r.unwrap().0)
@@ -1635,14 +1636,14 @@ mod tests {
 
         // 3. INSERT query_all should have None in result rows.
         let insert_res1 = connection.query_all(&insert_query, (0,)).await.unwrap();
-        assert!(insert_res1.rows.is_none());
+        assert!(insert_res1.rows().is_err());
 
         let prepared_insert = connection.prepare(&insert_query).await.unwrap();
         let insert_res2 = connection
             .execute_all(&prepared_insert, (0,))
             .await
             .unwrap();
-        assert!(insert_res2.rows.is_none(),);
+        assert!(insert_res2.rows().is_err(),);
 
         // 4. Calling query_all with a Query that doesn't have page_size set should result in an error.
         let no_page_size_query = Query::new("SELECT p FROM connection_query_all_tab");

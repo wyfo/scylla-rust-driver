@@ -412,13 +412,13 @@ async fn query_peers(
 
     let (peers_res, local_res) = tokio::try_join!(peers_query_future, local_query_future)?;
 
-    let peers_rows = peers_res.rows.ok_or(QueryError::ProtocolError(
-        "system.peers query response was not Rows",
-    ))?;
+    let peers_rows = peers_res
+        .rows()
+        .map_err(|_| QueryError::ProtocolError("system.peers query response was not Rows"))?;
 
-    let local_rows = local_res.rows.ok_or(QueryError::ProtocolError(
-        "system.local query response was not Rows",
-    ))?;
+    let local_rows = local_res
+        .rows()
+        .map_err(|_| QueryError::ProtocolError("system.local query response was not Rows"))?;
 
     let typed_peers_rows =
         peers_rows.into_typed::<(IpAddr, Option<String>, Option<String>, Option<Vec<String>>)>();
@@ -509,13 +509,13 @@ async fn query_keyspaces(
         Query::new("select keyspace_name, replication from system_schema.keyspaces");
     keyspaces_query.set_page_size(1024);
 
-    let rows =
-        conn.query_all(&keyspaces_query, &[])
-            .await?
-            .rows
-            .ok_or(QueryError::ProtocolError(
-                "system_schema.keyspaces query response was not Rows",
-            ))?;
+    let rows = conn
+        .query_all(&keyspaces_query, &[])
+        .await?
+        .rows()
+        .map_err(|_| {
+            QueryError::ProtocolError("system_schema.keyspaces query response was not Rows")
+        })?;
 
     let mut result = HashMap::with_capacity(rows.len());
     let (mut all_tables, mut all_views, mut all_user_defined_types) = if fetch_schema {
@@ -565,10 +565,10 @@ async fn query_user_defined_types(
     let rows = conn
         .query_all(&user_defined_types_query, &[])
         .await?
-        .rows
-        .ok_or(QueryError::ProtocolError(
-            "system_schema.types query response was not Rows",
-        ))?;
+        .rows()
+        .map_err(|_| {
+            QueryError::ProtocolError("system_schema.types query response was not Rows")
+        })?;
 
     let mut result = HashMap::with_capacity(rows.len());
 
@@ -601,10 +601,10 @@ async fn query_tables(
     let rows = conn
         .query_all(&tables_query, &[])
         .await?
-        .rows
-        .ok_or(QueryError::ProtocolError(
-            "system_schema.tables query response was not Rows",
-        ))?;
+        .rows()
+        .map_err(|_| {
+            QueryError::ProtocolError("system_schema.tables query response was not Rows")
+        })?;
 
     let mut result = HashMap::with_capacity(rows.len());
     let mut tables = query_tables_schema(conn).await?;
@@ -642,10 +642,10 @@ async fn query_views(
     let rows = conn
         .query_all(&views_query, &[])
         .await?
-        .rows
-        .ok_or(QueryError::ProtocolError(
-            "system_schema.views query response was not Rows",
-        ))?;
+        .rows()
+        .map_err(|_| {
+            QueryError::ProtocolError("system_schema.views query response was not Rows")
+        })?;
 
     let mut result = HashMap::with_capacity(rows.len());
     let mut tables = query_tables_schema(conn).await?;
@@ -693,10 +693,10 @@ async fn query_tables_schema(
     let rows = conn
         .query_all(&columns_query, &[])
         .await?
-        .rows
-        .ok_or(QueryError::ProtocolError(
-            "system_schema.columns query response was not Rows",
-        ))?;
+        .rows()
+        .map_err(|_| {
+            QueryError::ProtocolError("system_schema.columns query response was not Rows")
+        })?;
 
     let mut tables_schema = HashMap::with_capacity(rows.len());
 
@@ -905,9 +905,9 @@ async fn query_table_partitioners(
         // system_schema.scylla_tables.
         // For more information please refer to https://github.com/scylladb/scylla-rust-driver/pull/349#discussion_r762050262
         Err(QueryError::DbError(DbError::Invalid, _)) => return Ok(HashMap::new()),
-        query_result => query_result?.rows.ok_or(QueryError::ProtocolError(
-            "system_schema.scylla_tables query response was not Rows",
-        ))?,
+        query_result => query_result?.rows().map_err(|_| {
+            QueryError::ProtocolError("system_schema.scylla_tables query response was not Rows")
+        })?,
     };
 
     let mut result = HashMap::with_capacity(rows.len());

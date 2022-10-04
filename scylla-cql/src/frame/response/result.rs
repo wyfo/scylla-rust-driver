@@ -374,7 +374,7 @@ impl Row {
 pub struct Rows {
     pub metadata: ResultMetadata,
     pub rows_count: usize,
-    pub rows: Vec<Row>,
+    pub bytes: Bytes,
 }
 
 #[derive(Debug)]
@@ -556,7 +556,7 @@ fn deser_prepared_metadata(buf: &mut &[u8]) -> StdResult<PreparedMetadata, Parse
     })
 }
 
-fn deser_cql_value(typ: &ColumnType, buf: &mut &[u8]) -> StdResult<CqlValue, ParseError> {
+pub(crate) fn deser_cql_value(typ: &ColumnType, buf: &mut &[u8]) -> StdResult<CqlValue, ParseError> {
     use ColumnType::*;
 
     if buf.is_empty() {
@@ -829,7 +829,9 @@ fn deser_cql_value(typ: &ColumnType, buf: &mut &[u8]) -> StdResult<CqlValue, Par
     })
 }
 
-fn deser_rows(buf: &mut &[u8]) -> StdResult<Rows, ParseError> {
+fn deser_rows(bytes: Bytes) -> StdResult<Rows, ParseError> {
+    let mut chunk = bytes.chunk();
+    let buf = &mut chunk;
     let metadata = deser_result_metadata(buf)?;
 
     // TODO: the protocol allows an optimization (which must be explicitly requested on query by
@@ -840,23 +842,10 @@ fn deser_rows(buf: &mut &[u8]) -> StdResult<Rows, ParseError> {
 
     let rows_count: usize = types::read_int(buf)?.try_into()?;
 
-    let mut rows = Vec::with_capacity(rows_count);
-    for _ in 0..rows_count {
-        let mut columns = Vec::with_capacity(metadata.col_count);
-        for i in 0..metadata.col_count {
-            let v = if let Some(mut b) = types::read_bytes_opt(buf)? {
-                Some(deser_cql_value(&metadata.col_specs[i].typ, &mut b)?)
-            } else {
-                None
-            };
-            columns.push(v);
-        }
-        rows.push(Row { columns });
-    }
     Ok(Rows {
         metadata,
         rows_count,
-        rows,
+        bytes: bytes.slice_ref(buf),
     })
 }
 
@@ -886,11 +875,13 @@ fn deser_schema_change(buf: &mut &[u8]) -> StdResult<SchemaChange, ParseError> {
     })
 }
 
-pub fn deserialize(buf: &mut &[u8]) -> StdResult<Result, ParseError> {
+pub fn deserialize(bytes: Bytes) -> StdResult<Result, ParseError> {
     use self::Result::*;
+    let mut chunk = bytes.chunk();
+    let buf = &mut chunk;
     Ok(match types::read_int(buf)? {
         0x0001 => Void,
-        0x0002 => Rows(deser_rows(buf)?),
+        0x0002 => Rows(deser_rows(bytes.slice_ref(buf))?),
         0x0003 => SetKeyspace(deser_set_keyspace(buf)?),
         0x0004 => Prepared(deser_prepared(buf)?),
         0x0005 => SchemaChange(deser_schema_change(buf)?),

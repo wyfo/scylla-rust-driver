@@ -2,7 +2,9 @@ use crate::frame::response::cql_to_rust::{FromRow, FromRowError};
 use crate::frame::response::result::ColumnSpec;
 use crate::frame::response::result::Row;
 use crate::transport::session::{IntoTypedRows, TypedRowIter};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
+use scylla_cql::frame::response::rows::RowDeserializer;
+use std::marker::PhantomData;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -10,10 +12,11 @@ use uuid::Uuid;
 /// Contains all rows returned by the database and some more information
 #[derive(Default, Debug)]
 pub struct QueryResult {
-    /// Rows returned by the database.\
-    /// Queries like `SELECT` will have `Some(Vec)`, while queries like `INSERT` will have `None`.\
-    /// Can contain an empty Vec.
-    pub rows: Option<Vec<Row>>,
+    /// Raw rows returned by the database.\
+    /// Queries like `SELECT` will have `Some(bytes)`, while queries like `INSERT` will have `None`.\
+    /// Can contain empty bytes.
+    pub bytes: Option<Bytes>,
+    pub row_count: usize,
     /// Warnings returned by the database
     pub warnings: Vec<String>,
     /// CQL Tracing uuid - can only be Some if tracing is enabled for this query
@@ -28,9 +31,9 @@ impl QueryResult {
     /// Returns the number of received rows.\
     /// Fails when the query isn't of a type that could return rows, same as [`rows()`](QueryResult::rows).
     pub fn rows_num(&self) -> Result<usize, RowsExpectedError> {
-        match &self.rows {
-            Some(rows) => Ok(rows.len()),
-            None => Err(RowsExpectedError),
+        match self.bytes {
+            Some(_) => Ok(self.row_count),
+            _ => Err(RowsExpectedError),
         }
     }
 
@@ -38,10 +41,10 @@ impl QueryResult {
     /// If `QueryResult.rows` is `None`, which means that this query is not supposed to return rows (e.g `INSERT`), returns an error.\
     /// Can return an empty `Vec`.
     pub fn rows(self) -> Result<Vec<Row>, RowsExpectedError> {
-        match self.rows {
-            Some(rows) => Ok(rows),
-            None => Err(RowsExpectedError),
-        }
+        self.rows_iter()
+            .map_err(|_| RowsExpectedError)?
+            .collect::<Result<_, _>>()
+            .map_err(|_| RowsExpectedError)
     }
 
     /// Returns the received rows parsed as the given type.\
@@ -55,7 +58,7 @@ impl QueryResult {
     /// Will return `Ok` for `INSERT` result, but a `SELECT` result, even an empty one, will cause an error.\
     /// Opposite of [`rows()`](QueryResult::rows).
     pub fn result_not_rows(&self) -> Result<(), RowsNotExpectedError> {
-        match self.rows {
+        match self.bytes {
             Some(_) => Err(RowsNotExpectedError),
             None => Ok(()),
         }
@@ -64,7 +67,7 @@ impl QueryResult {
     /// Returns rows when `QueryResult.rows` is `Some`, otherwise an empty Vec.\
     /// Equal to `rows().unwrap_or_default()`.
     pub fn rows_or_empty(self) -> Vec<Row> {
-        self.rows.unwrap_or_default()
+        self.rows().unwrap_or_default()
     }
 
     /// Returns rows parsed as the given type.\
@@ -136,17 +139,58 @@ impl QueryResult {
     /// other is the result of a new paged query.\
     /// It is merged with current result kept in self.\
     pub(crate) fn merge_with_next_page_res(&mut self, other: QueryResult) {
-        if let Some(other_rows) = other.rows {
-            match &mut self.rows {
-                Some(self_rows) => self_rows.extend(other_rows),
-                None => self.rows = Some(other_rows),
-            }
-        };
-
+        if let Some(other_rows) = other.bytes {
+            self.bytes = Some(match self.bytes {
+                Some(ref rows) => {
+                    let mut bytes = BytesMut::with_capacity(rows.len() + other_rows.len());
+                    bytes.extend_from_slice(rows);
+                    bytes.extend_from_slice(&other_rows);
+                    bytes.into()
+                }
+                None => other_rows,
+            });
+        }
         self.warnings.extend(other.warnings);
         self.tracing_id = other.tracing_id;
         self.paging_state = other.paging_state;
         self.col_specs = other.col_specs;
+    }
+
+    pub fn rows_iter<Row>(self) -> Result<RowsDeserializer<Row>, ()>
+    where
+        Row: RowDeserializer,
+    {
+        Row::match_column_specs(&self.col_specs).map_err(|_| ())?;
+        Ok(RowsDeserializer {
+            bytes: self.bytes.ok_or(RowsExpectedError).map_err(|_| ())?,
+            row_count: self.row_count,
+            col_specs: self.col_specs,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+pub struct RowsDeserializer<Row> {
+    bytes: Bytes,
+    row_count: usize,
+    col_specs: Vec<ColumnSpec>,
+    _phantom: PhantomData<Row>,
+}
+
+impl<Row> Iterator for RowsDeserializer<Row>
+where
+    Row: RowDeserializer,
+{
+    type Item = Result<Row, ()>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.row_count -= 1;
+        match self.row_count {
+            0 => None,
+            _ => Some(Row::deserialize(&mut self.bytes, &self.col_specs)),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.row_count, Some(self.row_count))
     }
 }
 
@@ -281,14 +325,15 @@ mod tests {
     // Returns specified number of rows, each one containing one int32 value.
     // Values are 0, 1, 2, 3, 4, ...
     fn make_rows(rows_num: usize) -> Vec<Row> {
-        let mut rows: Vec<Row> = Vec::with_capacity(rows_num);
-        for cur_value in 0..rows_num {
-            let int_val: i32 = cur_value.try_into().unwrap();
-            rows.push(Row {
-                columns: vec![Some(CqlValue::Int(int_val))],
-            });
-        }
-        rows
+        todo!()
+        // let mut rows: Vec<Row> = Vec::with_capacity(rows_num);
+        // for cur_value in 0..rows_num {
+        //     let int_val: i32 = cur_value.try_into().unwrap();
+        //     rows.push(Row {
+        //         columns: vec![Some(CqlValue::Int(int_val))],
+        //     });
+        // }
+        // rows
     }
 
     // Just like make_rows, but each column has one String value
@@ -316,7 +361,8 @@ mod tests {
         };
 
         QueryResult {
-            rows: None,
+            bytes: None,
+            row_count: 0,
             warnings: vec![],
             tracing_id: None,
             paging_state: None,
@@ -325,15 +371,17 @@ mod tests {
     }
 
     fn make_rows_query_result(rows_num: usize) -> QueryResult {
-        let mut res = make_not_rows_query_result();
-        res.rows = Some(make_rows(rows_num));
-        res
+        todo!();
+        // let mut res = make_not_rows_query_result();
+        // res.rows = Some(make_rows(rows_num));
+        // res
     }
 
     fn make_string_rows_query_result(rows_num: usize) -> QueryResult {
-        let mut res = make_not_rows_query_result();
-        res.rows = Some(make_string_rows(rows_num));
-        res
+        todo!();
+        // let mut res = make_not_rows_query_result();
+        // res.rows = Some(make_string_rows(rows_num));
+        // res
     }
 
     #[test]

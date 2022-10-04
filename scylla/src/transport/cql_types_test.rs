@@ -95,7 +95,7 @@ where
             .query(select_values, &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(T,)>()
             .map(Result::unwrap)
@@ -185,7 +185,7 @@ async fn test_counter() {
             .query(select_values, (i as i32,))
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(Counter,)>()
             .map(Result::unwrap)
@@ -244,7 +244,7 @@ async fn test_naive_date() {
             .query("SELECT val from naive_date", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(NaiveDate,)>()
             .next()
@@ -268,7 +268,7 @@ async fn test_naive_date() {
                 .query("SELECT val from naive_date", &[])
                 .await
                 .unwrap()
-                .rows
+                .rows()
                 .unwrap()
                 .into_typed::<(NaiveDate,)>()
                 .next()
@@ -327,7 +327,7 @@ async fn test_date() {
             .query("SELECT val from date_tests", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()[0]
             .columns[0]
             .as_ref()
@@ -376,7 +376,7 @@ async fn test_time() {
             .query("SELECT val from time_tests", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(Duration,)>()
             .next()
@@ -398,7 +398,7 @@ async fn test_time() {
             .query("SELECT val from time_tests", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(Duration,)>()
             .next()
@@ -480,7 +480,7 @@ async fn test_timestamp() {
             .query("SELECT val from timestamp_tests", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(Duration,)>()
             .next()
@@ -502,7 +502,7 @@ async fn test_timestamp() {
             .query("SELECT val from timestamp_tests", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(Duration,)>()
             .next()
@@ -556,7 +556,7 @@ async fn test_timeuuid() {
             .query("SELECT val from timeuuid_tests", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(Uuid,)>()
             .next()
@@ -579,7 +579,7 @@ async fn test_timeuuid() {
             .query("SELECT val from timeuuid_tests", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(Uuid,)>()
             .next()
@@ -648,7 +648,7 @@ async fn test_inet() {
             .query("SELECT val from inet_tests WHERE id = 0", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(IpAddr,)>()
             .next()
@@ -667,7 +667,7 @@ async fn test_inet() {
             .query("SELECT val from inet_tests WHERE id = 0", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(IpAddr,)>()
             .next()
@@ -721,7 +721,7 @@ async fn test_blob() {
             .query("SELECT val from blob_tests WHERE id = 0", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(Vec<u8>,)>()
             .next()
@@ -740,7 +740,7 @@ async fn test_blob() {
             .query("SELECT val from blob_tests WHERE id = 0", &[])
             .await
             .unwrap()
-            .rows
+            .rows()
             .unwrap()
             .into_typed::<(Vec<u8>,)>()
             .next()
@@ -833,7 +833,7 @@ async fn test_udt_after_schema_update() {
         .query(format!("SELECT val from {} WHERE id = 0", table_name), &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(UdtV1,)>()
         .next()
@@ -854,7 +854,7 @@ async fn test_udt_after_schema_update() {
         .query(format!("SELECT val from {} WHERE id = 0", table_name), &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(UdtV1,)>()
         .next()
@@ -879,7 +879,7 @@ async fn test_udt_after_schema_update() {
         .query(format!("SELECT val from {} WHERE id = 0", table_name), &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(UdtV2,)>()
         .next()

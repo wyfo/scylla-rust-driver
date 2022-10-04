@@ -51,7 +51,7 @@ async fn insert_and_select<InsertT, SelectT>(
         .query(format!("SELECT val FROM {} WHERE p = 0", table_name), ())
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap()
         .into_typed::<(SelectT,)>()
         .next()

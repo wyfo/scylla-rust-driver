@@ -59,7 +59,7 @@ async fn test_cqlvalue_udt() {
         .query("SELECT my FROM cqlvalue_udt_test", &[])
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap();
 
     assert_eq!(rows.len(), 1);
@@ -114,7 +114,7 @@ async fn test_cqlvalue_duration() {
         )
         .await
         .unwrap()
-        .rows
+        .rows()
         .unwrap();
 
     assert_eq!(rows.len(), 4);
